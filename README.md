@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 # Fivetran Value Dashboard - dbt Charts starter
 
 A four-board adaptation of `Fivetran_Streamlit_App_Guide.md`, using the same source database and schema: `NAAG_POSTGRES.NAAG_FIVETRAN_LOG`.
@@ -248,3 +249,7 @@ The default project config sets `cloud.allow_public: false`. Keep it private. Cu
 "Fivetran brings its operational metadata into Snowflake. We use the same evidence to investigate recorded events, review consumption drivers and trace changes. dbt Charts presents those questions as version-controlled dashboards. The last page is a transparent assumption-based example of the engineering capacity that faster investigation could release."
 
 Only add "dbt models define and test the metrics" after you have actually implemented and built the optional dbt model layer.
+=======
+# apac-fe
+APAC Field Engineering Github repository
+>>>>>>> origin/main
