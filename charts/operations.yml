@@ -1,0 +1,241 @@
+title: Fivetran | Operations
+source: fivetran
+variables:
+  connection_id:
+    input: select
+    label: Connection
+    query: queries.connection_choices
+    placeholder: All connections
+  start_date:
+    input: datepicker
+    label: Start date (UTC; blank = seven-day window)
+  end_date:
+    input: datepicker
+    label: End date (UTC; blank = latest observed LOG date)
+  event_scope:
+    input: select
+    label: Event detail
+    default: Warnings and errors
+    options:
+      static:
+      - Warnings and errors
+      - All events
+  event_id:
+    input: select
+    label: Inspect a recorded event payload
+    query: queries.payload_choices
+    placeholder: Select an event; no payload shown by default
+queries:
+  connection_choices:
+    sql: |
+      SELECT CONNECTION_ID AS "value",
+             COALESCE(CONNECTION_NAME, CONNECTION_ID) || ' [' || CONNECTION_ID || ']'
+               || IFF(COALESCE(_FIVETRAN_DELETED, FALSE), ' [deleted]', '') AS "label"
+      FROM NAAG_POSTGRES.NAAG_FIVETRAN_LOG.CONNECTION
+      WHERE CONNECTION_ID IS NOT NULL
+      ORDER BY CONNECTION_NAME, CONNECTION_ID
+  log_coverage:
+    sql: |
+      SELECT MIN(CONVERT_TIMEZONE('UTC', TIME_STAMP)) AS "first_log_event_utc",
+             MAX(CONVERT_TIMEZONE('UTC', TIME_STAMP)) AS "last_log_event_utc",
+             MAX(CONVERT_TIMEZONE('UTC', _FIVETRAN_SYNCED)) AS "newest_log_row_landed_utc"
+      FROM NAAG_POSTGRES.NAAG_FIVETRAN_LOG.LOG
+  date_bounds:
+    sql: |
+      SELECT
+        {% if start_date %}
+          TO_DATE('{{ start_date }}')
+        {% else %}
+          DATEADD('DAY', -6,
+            {% if end_date %} TO_DATE('{{ end_date }}')
+            {% else %} COALESCE("last_log_event_utc"::DATE, CURRENT_DATE()) {% endif %}
+          )
+        {% endif %} AS "start_date",
+        {% if end_date %} TO_DATE('{{ end_date }}')
+        {% else %} COALESCE("last_log_event_utc"::DATE, CURRENT_DATE()) {% endif %} AS "end_date"
+      FROM {{ queries.log_coverage }}
+  period_check:
+    sql: |
+      SELECT "start_date", "end_date", DATEDIFF('DAY', "start_date", "end_date") + 1 AS "days_inclusive",
+             CASE
+               WHEN "start_date" > "end_date" THEN 'INVALID: start date must not exceed end date'
+               WHEN DATEDIFF('DAY', "start_date", "end_date") > 92 THEN 'INVALID: choose 93 days or fewer'
+               ELSE 'Valid period; both dates are UTC and end date is inclusive'
+             END AS "period_check"
+      FROM {{ queries.date_bounds }}
+  filtered_events:
+    sql: |
+      SELECT TO_VARCHAR(l.ID) AS "event_id", l.CONNECTION_ID AS "connection_id",
+             COALESCE(c.CONNECTION_NAME, l.CONNECTION_ID, 'Account / unknown') AS "connection_name",
+             CONVERT_TIMEZONE('UTC', l.TIME_STAMP) AS "event_time_utc",
+             l.EVENT AS "event", l.MESSAGE_EVENT AS "message_event", l.SYNC_ID AS "sync_id"
+      FROM NAAG_POSTGRES.NAAG_FIVETRAN_LOG.LOG l
+      LEFT JOIN NAAG_POSTGRES.NAAG_FIVETRAN_LOG.CONNECTION c ON l.CONNECTION_ID = c.CONNECTION_ID
+      CROSS JOIN {{ queries.date_bounds }}
+      WHERE l.TIME_STAMP >= TO_TIMESTAMP_TZ(TO_CHAR(date_bounds."start_date", 'YYYY-MM-DD') || ' 00:00:00 +00:00')
+        AND l.TIME_STAMP < TO_TIMESTAMP_TZ(TO_CHAR(DATEADD('DAY', 1, date_bounds."end_date"), 'YYYY-MM-DD') || ' 00:00:00 +00:00')
+        AND DATEDIFF('DAY', date_bounds."start_date", date_bounds."end_date") BETWEEN 0 AND 92
+        AND {{ filter('l.CONNECTION_ID', connection_id) }}
+  summary:
+    sql: |
+      SELECT COUNT(DISTINCT "connection_id") AS "connections_with_events",
+             COALESCE(COUNT_IF(UPPER("event") = 'WARNING'), 0) AS "warning_events",
+             COALESCE(COUNT_IF(UPPER("event") IN ('SEVERE','ERROR','FATAL')), 0) AS "severe_events"
+      FROM {{ queries.filtered_events }}
+  connection_summary:
+    sql: |
+      SELECT "connection_id", "connection_name", MAX("event_time_utc") AS "last_observed_event_utc",
+             COUNT(*) AS "log_events",
+             COALESCE(COUNT_IF(UPPER("event") = 'WARNING'), 0) AS "warning_events",
+             COALESCE(COUNT_IF(UPPER("event") IN ('SEVERE','ERROR','FATAL')), 0) AS "severe_events"
+      FROM {{ queries.filtered_events }}
+      GROUP BY "connection_id", "connection_name"
+      ORDER BY "severe_events" DESC, "warning_events" DESC, "log_events" DESC
+  daily_events:
+    sql: |
+      SELECT "event_time_utc"::DATE AS "event_date_utc",
+             CASE WHEN UPPER("event") = 'WARNING' THEN 'Warning'
+                  WHEN UPPER("event") IN ('SEVERE','ERROR','FATAL') THEN 'Severe / error'
+                  ELSE 'Other recorded events' END AS "event_category",
+             COUNT(*) AS "event_count"
+      FROM {{ queries.filtered_events }}
+      GROUP BY "event_date_utc", "event_category"
+      ORDER BY "event_date_utc", "event_category"
+  recent_events:
+    sql: |
+      SELECT "event_id", "event_time_utc", "connection_id", "event", "message_event", "sync_id"
+      FROM {{ queries.filtered_events }}
+      WHERE 1=1
+        {% if event_scope != 'All events' %}
+        AND UPPER("event") IN ('WARNING','SEVERE','ERROR','FATAL')
+        {% endif %}
+      ORDER BY "event_time_utc" DESC, "event_id" DESC
+      LIMIT 200
+  payload_choices:
+    sql: |
+      SELECT "event_id" AS "value",
+             TO_VARCHAR("event_time_utc", 'YYYY-MM-DD HH24:MI:SS') || ' UTC | '
+             || COALESCE("message_event", "event", 'Recorded event') || ' | ' || "event_id" AS "label"
+      FROM {{ queries.recent_events }}
+      ORDER BY "event_time_utc" DESC, "event_id" DESC
+  selected_payload:
+    sql: |
+      SELECT recent_events."event_id", recent_events."event_time_utc", recent_events."connection_id",
+             l.MESSAGE_DATA::VARCHAR AS "recorded_payload"
+      FROM {{ queries.recent_events }}
+      JOIN NAAG_POSTGRES.NAAG_FIVETRAN_LOG.LOG l ON TO_VARCHAR(l.ID) = recent_events."event_id"
+      WHERE
+        {% if event_id %}
+          {{ filter('recent_events."event_id"', event_id) }}
+        {% else %}
+          1=0
+        {% endif %}
+      ORDER BY recent_events."event_time_utc" DESC
+      LIMIT 1
+charts:
+  context:
+    type: callout
+    title: Where should the team investigate?
+    message: Recorded log events, not live connection health. Warning and severe/error counts are not incident
+      counts. The event-detail selector does not change the summary KPIs.
+    style:
+      tone: info
+  period:
+    type: table
+    query: period_check
+    title: Selected period
+  connections:
+    type: kpi
+    query: summary
+    value: connections_with_events
+    label: Connections with log events
+    style:
+      value:
+        format: ',.0f'
+  warnings:
+    type: kpi
+    query: summary
+    value: warning_events
+    label: Warning events
+    style:
+      value:
+        format: ',.0f'
+  severe:
+    type: kpi
+    query: summary
+    value: severe_events
+    label: Severe / error events
+    style:
+      value:
+        format: ',.0f'
+  trend:
+    type: line
+    query: daily_events
+    title: Recorded events by UTC date
+    x: event_date_utc
+    y: event_count
+    color: event_category
+  connection_table:
+    type: table
+    query: connection_summary
+    title: Connection-level evidence
+    style:
+      columns:
+        last_observed_event_utc:
+          format: '%Y-%m-%d %H:%M:%S'
+        log_events:
+          format: ',.0f'
+        warning_events:
+          format: ',.0f'
+        severe_events:
+          format: ',.0f'
+  details:
+    type: table
+    query: recent_events
+    title: Latest matching events - up to 200
+    style:
+      columns:
+        event_time_utc:
+          format: '%Y-%m-%d %H:%M:%S'
+  payload_notice:
+    type: callout
+    title: Payload inspection
+    message: Select one event above. Payloads are displayed as text, not a Streamlit JSON tree. Review sensitive
+      content before recording or sharing.
+    style:
+      tone: info
+  payload:
+    type: table
+    query: selected_payload
+    title: Selected recorded payload
+    style:
+      columns:
+        event_time_utc:
+          format: '%Y-%m-%d %H:%M:%S'
+        recorded_payload:
+          max_width: 800
+  freshness:
+    type: table
+    query: log_coverage
+    title: Observed LOG coverage - not a completed-sync watermark
+    style:
+      columns:
+        first_log_event_utc:
+          format: '%Y-%m-%d %H:%M:%S'
+        last_log_event_utc:
+          format: '%Y-%m-%d %H:%M:%S'
+        newest_log_row_landed_utc:
+          format: '%Y-%m-%d %H:%M:%S'
+rows:
+- context
+- period
+- cols:
+  - connections
+  - warnings
+  - severe
+- trend
+- connection_table
+- details
+- payload_notice
+- payload
+- freshness

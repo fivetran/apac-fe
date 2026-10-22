@@ -1,0 +1,20 @@
+sources:
+  fivetran:
+    type: snowflake
+    account: '{{ env_var(''SF_ACCOUNT'') }}'
+    user: '{{ env_var(''SF_USER'') }}'
+    role: '{{ env_var(''SF_ROLE'') }}'
+    warehouse: '{{ env_var(''SF_WAREHOUSE'') }}'
+    database: NAAG_POSTGRES
+    schema: NAAG_FIVETRAN_LOG
+    authenticator: externalbrowser
+    session_parameters:
+      TIMEZONE: UTC
+execution:
+  max_workers: 1
+  max_query_duration_seconds: 120
+server:
+  port: 3000
+  debug: false
+cloud:
+  allow_public: false

@@ -1,0 +1,19 @@
+sources:
+  fivetran:
+    type: snowflake
+    account: GQ81837-SALES_ENG_DEMO
+    user: NAAG.BALAKRISH@FIVETRAN.COM
+    role: SALES_ENGINEERING
+    warehouse: DEFAULT
+    database: NAAG_POSTGRES
+    schema: NAAG_FIVETRAN_LOG
+    authenticator: externalbrowser
+
+execution:
+  max_workers: 1
+  max_query_duration_seconds: 120
+server:
+  port: 3000
+  debug: false
+cloud:
+  allow_public: false

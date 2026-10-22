@@ -1,0 +1,132 @@
+title: Fivetran | Value calculator
+source: fivetran
+variables:
+  investigations:
+    input: number
+    label: Investigations per month
+    default: 20
+    required: true
+    min: 0
+    step: 1
+    max: 10000
+  hours_before:
+    input: number
+    label: Hours before / investigation
+    default: 1.0
+    required: true
+    min: 0
+    step: 0.25
+  hours_after:
+    input: number
+    label: Hours with dashboard / investigation
+    default: 0.25
+    required: true
+    min: 0
+    step: 0.25
+  hourly_cost:
+    input: number
+    label: Loaded engineering cost (AUD / hour)
+    default: 150.0
+    required: true
+    min: 0
+    step: 10
+  running_cost:
+    input: number
+    label: App / warehouse running cost (AUD / month)
+    default: 0.0
+    required: true
+    min: 0
+    step: 10
+  implementation_cost:
+    input: number
+    label: One-off implementation cost (AUD)
+    default: 0.0
+    required: true
+    min: 0
+    step: 100
+queries:
+  scenario:
+    sql: |
+      WITH assumptions AS (
+        SELECT CAST('{{ investigations }}' AS NUMBER(38,0)) AS investigations,
+               CAST('{{ hours_before }}' AS FLOAT) AS hours_before,
+               CAST('{{ hours_after }}' AS FLOAT) AS hours_after,
+               CAST('{{ hourly_cost }}' AS FLOAT) AS hourly_cost,
+               CAST('{{ running_cost }}' AS FLOAT) AS running_cost,
+               CAST('{{ implementation_cost }}' AS FLOAT) AS implementation_cost
+      ), hours AS (
+        SELECT *, investigations * (hours_before - hours_after) AS released_hours FROM assumptions
+      ), capacity AS (
+        SELECT *, released_hours * hourly_cost AS capacity_value FROM hours
+      )
+      SELECT released_hours AS "monthly_hours_released", capacity_value AS "monthly_capacity_value_aud",
+             12 * (capacity_value - running_cost) - implementation_cost AS "first_year_net_value_aud",
+             running_cost AS "running_cost_aud_per_month", implementation_cost AS "implementation_cost_aud",
+             CASE WHEN released_hours < 0 THEN 'These assumptions increase investigation effort: negative value'
+                  WHEN running_cost = 0 AND implementation_cost = 0 THEN 'Both cost assumptions are zero; enter customer estimates'
+                  ELSE 'Illustrative engineering-capacity value; not measured cash savings' END AS "scenario_note"
+      FROM capacity
+charts:
+  context:
+    type: callout
+    title: What could faster investigations be worth?
+    message: Illustrative scenario only. Every input is an assumption, not inferred from log events. No realised
+      savings are measured.
+    style:
+      tone: warning
+  hours:
+    type: kpi
+    query: scenario
+    value: monthly_hours_released
+    label: Monthly hours released - scenario
+    style:
+      value:
+        format: ',.1f'
+  capacity:
+    type: kpi
+    query: scenario
+    value: monthly_capacity_value_aud
+    label: Monthly capacity value (AUD) - scenario
+    style:
+      value:
+        format: $,.0f
+  first_year:
+    type: kpi
+    query: scenario
+    value: first_year_net_value_aud
+    label: First-year net value (AUD) - scenario
+    style:
+      value:
+        format: $,.0f
+  results:
+    type: table
+    query: scenario
+    title: Scenario results and cost assumptions
+    style:
+      columns:
+        monthly_hours_released:
+          format: ',.1f'
+        monthly_capacity_value_aud:
+          format: $,.0f
+        first_year_net_value_aud:
+          format: $,.0f
+        running_cost_aud_per_month:
+          format: $,.0f
+        implementation_cost_aud:
+          format: $,.0f
+  interpretation:
+    type: callout
+    title: Capacity is not automatically a cash saving
+    message: Monthly hours = investigations x (before - after). Capacity value = hours x loaded hourly cost.
+      First-year net value = 12 x (capacity value - monthly running cost) - implementation cost. Subscription
+      savings and outage avoidance are excluded.
+    style:
+      tone: info
+rows:
+- context
+- cols:
+  - hours
+  - capacity
+  - first_year
+- results
+- interpretation

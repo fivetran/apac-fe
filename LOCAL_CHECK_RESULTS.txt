@@ -1,0 +1,6 @@
+PASS mar_usage.yml: 9 queries; 9 charts; 3 input states
+PASS value_calculator.yml: 1 queries; 6 charts; 3 input states
+PASS changes_audit.yml: 8 queries; 5 charts; 7 input states
+PASS operations.yml: 11 queries; 11 charts; 8 input states
+PASS: 4 boards, 29 queries, 174 offline template expansions.
+NOT CHECKED: dct schema/renderer, parameter binding, live source data, privileges, Snowflake SQL execution.
