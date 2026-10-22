@@ -1,0 +1,14 @@
+.venv/
+.env
+.env.*
+!.env.example
+local_env.sh
+*.pem
+*.p8
+*.key
+profiles.yml
+.dct/
+*.duckdb
+*.duckdb.wal
+__pycache__/
+validation*.json

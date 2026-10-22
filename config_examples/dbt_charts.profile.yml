@@ -1,0 +1,13 @@
+sources:
+  fivetran:
+    type: dbt_profile
+    profile: REPLACE_WITH_EXISTING_PROFILE_NAME
+    target: dev
+execution:
+  max_workers: 1
+  max_query_duration_seconds: 120
+server:
+  port: 3000
+  debug: false
+cloud:
+  allow_public: false

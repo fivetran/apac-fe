@@ -1,0 +1,176 @@
+title: Fivetran | MAR usage
+source: fivetran
+variables:
+  connection_id:
+    input: select
+    label: Connection
+    query: queries.connection_choices
+    placeholder: All connections
+  usage_month:
+    input: select
+    label: Usage month
+    query: queries.month_choices
+    placeholder: Latest available month
+queries:
+  connection_choices:
+    sql: |
+      SELECT CONNECTION_ID AS "value",
+             COALESCE(CONNECTION_NAME, CONNECTION_ID) || ' [' || CONNECTION_ID || ']'
+               || IFF(COALESCE(_FIVETRAN_DELETED, FALSE), ' [deleted]', '') AS "label"
+      FROM NAAG_POSTGRES.NAAG_FIVETRAN_LOG.CONNECTION
+      WHERE CONNECTION_ID IS NOT NULL
+      ORDER BY CONNECTION_NAME, CONNECTION_ID
+  month_choices:
+    sql: |
+      SELECT DISTINCT TO_CHAR(DATE_TRUNC('MONTH', MEASURED_DATE)::DATE, 'YYYY-MM-DD') AS "value",
+             TO_CHAR(DATE_TRUNC('MONTH', MEASURED_DATE)::DATE, 'MMMM YYYY') AS "label"
+      FROM NAAG_POSTGRES.NAAG_FIVETRAN_LOG.INCREMENTAL_MAR WHERE MEASURED_DATE IS NOT NULL
+      ORDER BY "value" DESC LIMIT 24
+  month_bounds:
+    sql: |
+      {% if usage_month %}
+        SELECT DATE_TRUNC('MONTH', TO_DATE('{{ usage_month }}'))::DATE AS "usage_month"
+      {% else %}
+        SELECT MAX(DATE_TRUNC('MONTH', MEASURED_DATE))::DATE AS "usage_month"
+        FROM NAAG_POSTGRES.NAAG_FIVETRAN_LOG.INCREMENTAL_MAR
+      {% endif %}
+  filtered_mar:
+    sql: |
+      SELECT m.MEASURED_DATE::DATE AS "measured_date", m.DESTINATION_ID AS "destination_id",
+             m.CONNECTION_NAME AS "connection_name", m.SCHEMA_NAME AS "schema_name", m.TABLE_NAME AS "table_name",
+             m.FREE_TYPE AS "free_type", m.SYNC_TYPE AS "sync_type", m.INCREMENTAL_ROWS AS "incremental_rows",
+             CONVERT_TIMEZONE('UTC', m._FIVETRAN_SYNCED) AS "row_landed_utc"
+      FROM NAAG_POSTGRES.NAAG_FIVETRAN_LOG.INCREMENTAL_MAR m
+      CROSS JOIN {{ queries.month_bounds }}
+      WHERE m.MEASURED_DATE >= month_bounds."usage_month"
+        AND m.MEASURED_DATE < DATEADD('MONTH', 1, month_bounds."usage_month")
+        {% if connection_id %}
+        AND EXISTS (
+          SELECT 1 FROM NAAG_POSTGRES.NAAG_FIVETRAN_LOG.CONNECTION c
+          WHERE {{ filter('c.CONNECTION_ID', connection_id) }}
+            AND c.CONNECTION_NAME = m.CONNECTION_NAME AND c.DESTINATION_ID = m.DESTINATION_ID
+        )
+        {% endif %}
+  summary:
+    sql: |
+      SELECT COALESCE(SUM(CASE WHEN "free_type" = 'PAID' THEN "incremental_rows" ELSE 0 END),0) AS "paid_mar",
+             COALESCE(SUM(CASE WHEN "free_type" <> 'PAID' THEN "incremental_rows" ELSE 0 END),0) AS "other_classified_mar",
+             COALESCE(SUM(CASE WHEN "free_type" IS NULL THEN "incremental_rows" ELSE 0 END),0) AS "unclassified_mar",
+             MAX("measured_date") AS "latest_measurement_date",
+             MAX("row_landed_utc") AS "newest_mar_row_landed_utc", COUNT(*) AS "measurement_rows"
+      FROM {{ queries.filtered_mar }}
+  coverage:
+    sql: |
+      SELECT month_bounds."usage_month", summary."latest_measurement_date", summary."newest_mar_row_landed_utc",
+             summary."measurement_rows",
+             CASE WHEN summary."measurement_rows" = 0 THEN 'No MAR records for this selection'
+                  WHEN summary."unclassified_mar" <> 0 THEN 'Review unclassified MAR; FREE_TYPE is null'
+                  ELSE 'Recorded increments only; not a final invoice' END AS "data_note"
+      FROM {{ queries.summary }} CROSS JOIN {{ queries.month_bounds }}
+  daily:
+    sql: |
+      SELECT "measured_date",
+             CASE WHEN "free_type" = 'PAID' THEN 'Paid MAR'
+                  WHEN "free_type" IS NULL THEN 'Unclassified MAR'
+                  ELSE 'Other classified MAR' END AS "mar_category",
+             SUM("incremental_rows") AS "recorded_mar"
+      FROM {{ queries.filtered_mar }}
+      GROUP BY "measured_date", "mar_category"
+      ORDER BY "measured_date", "mar_category"
+  top_tables:
+    sql: |
+      SELECT "destination_id", "connection_name", "schema_name", "table_name",
+             COALESCE(SUM(CASE WHEN "free_type" = 'PAID' THEN "incremental_rows" ELSE 0 END),0) AS "paid_mar",
+             COALESCE(SUM("incremental_rows"),0) AS "all_recorded_mar"
+      FROM {{ queries.filtered_mar }}
+      GROUP BY "destination_id", "connection_name", "schema_name", "table_name"
+      ORDER BY "paid_mar" DESC, "all_recorded_mar" DESC LIMIT 20
+  categories:
+    sql: |
+      SELECT "free_type", "sync_type", SUM("incremental_rows") AS "recorded_mar"
+      FROM {{ queries.filtered_mar }} GROUP BY "free_type", "sync_type" ORDER BY "recorded_mar" DESC
+charts:
+  context:
+    type: callout
+    title: What is driving consumption?
+    message: Monthly sums of recorded daily MAR increments, including every sync type. PAID means FREE_TYPE
+      = PAID. Partial-month or incomplete-history totals are not a final invoice.
+    style:
+      tone: info
+  paid:
+    type: kpi
+    query: summary
+    value: paid_mar
+    label: Paid MAR recorded
+    style:
+      value:
+        format: ',.0f'
+  other:
+    type: kpi
+    query: summary
+    value: other_classified_mar
+    label: Other classified MAR
+    style:
+      value:
+        format: ',.0f'
+  unclassified:
+    type: kpi
+    query: summary
+    value: unclassified_mar
+    label: Unclassified MAR - review if nonzero
+    style:
+      value:
+        format: ',.0f'
+  coverage:
+    type: table
+    query: coverage
+    title: Month and measurement coverage
+    style:
+      columns:
+        newest_mar_row_landed_utc:
+          format: '%Y-%m-%d %H:%M:%S'
+  trend:
+    type: line
+    query: daily
+    title: Daily MAR increments
+    x: measured_date
+    y: recorded_mar
+    color: mar_category
+  contributors:
+    type: table
+    query: top_tables
+    title: Top 20 table contributors
+    style:
+      columns:
+        paid_mar:
+          format: ',.0f'
+          spark: bar
+        all_recorded_mar:
+          format: ',.0f'
+  categories:
+    type: table
+    query: categories
+    title: Original usage categories and sync types
+    style:
+      columns:
+        recorded_mar:
+          format: ',.0f'
+  caveat:
+    type: callout
+    title: Interpretation
+    message: Connection filtering matches current connection name plus destination ID; historical renames may
+      leave usage unmatched. High usage is not proof of waste. This board calculates neither subscription charges
+      nor savings.
+    style:
+      tone: warning
+rows:
+- context
+- cols:
+  - paid
+  - other
+  - unclassified
+- coverage
+- trend
+- contributors
+- categories
+- caveat

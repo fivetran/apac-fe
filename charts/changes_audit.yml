@@ -1,0 +1,159 @@
+title: Fivetran | Changes and audit
+source: fivetran
+variables:
+  connection_id:
+    input: select
+    label: Connection
+    query: queries.connection_choices
+    placeholder: All connections
+  start_date:
+    input: datepicker
+    label: Start date (UTC; blank = seven-day window)
+  end_date:
+    input: datepicker
+    label: End date (UTC; blank = latest observed LOG date)
+queries:
+  connection_choices:
+    sql: |
+      SELECT CONNECTION_ID AS "value",
+             COALESCE(CONNECTION_NAME, CONNECTION_ID) || ' [' || CONNECTION_ID || ']'
+               || IFF(COALESCE(_FIVETRAN_DELETED, FALSE), ' [deleted]', '') AS "label"
+      FROM NAAG_POSTGRES.NAAG_FIVETRAN_LOG.CONNECTION
+      WHERE CONNECTION_ID IS NOT NULL
+      ORDER BY CONNECTION_NAME, CONNECTION_ID
+  log_coverage:
+    sql: |
+      SELECT MIN(CONVERT_TIMEZONE('UTC', TIME_STAMP)) AS "first_log_event_utc",
+             MAX(CONVERT_TIMEZONE('UTC', TIME_STAMP)) AS "last_log_event_utc",
+             MAX(CONVERT_TIMEZONE('UTC', _FIVETRAN_SYNCED)) AS "newest_log_row_landed_utc"
+      FROM NAAG_POSTGRES.NAAG_FIVETRAN_LOG.LOG
+  date_bounds:
+    sql: |
+      SELECT
+        {% if start_date %}
+          TO_DATE('{{ start_date }}')
+        {% else %}
+          DATEADD('DAY', -6,
+            {% if end_date %} TO_DATE('{{ end_date }}')
+            {% else %} COALESCE("last_log_event_utc"::DATE, CURRENT_DATE()) {% endif %}
+          )
+        {% endif %} AS "start_date",
+        {% if end_date %} TO_DATE('{{ end_date }}')
+        {% else %} COALESCE("last_log_event_utc"::DATE, CURRENT_DATE()) {% endif %} AS "end_date"
+      FROM {{ queries.log_coverage }}
+  period_check:
+    sql: |
+      SELECT "start_date", "end_date", DATEDIFF('DAY', "start_date", "end_date") + 1 AS "days_inclusive",
+             CASE
+               WHEN "start_date" > "end_date" THEN 'INVALID: start date must not exceed end date'
+               WHEN DATEDIFF('DAY', "start_date", "end_date") > 92 THEN 'INVALID: choose 93 days or fewer'
+               ELSE 'Valid period; both dates are UTC and end date is inclusive'
+             END AS "period_check"
+      FROM {{ queries.date_bounds }}
+  change_rows:
+    sql: |
+      SELECT CONVERT_TIMEZONE('UTC', e.DETECTED_AT) AS "detected_at_utc",
+             e.CONNECTION_ID AS "connection_id", e.DESTINATION_ID AS "destination_id", 'Schema' AS "entity",
+             e.SCHEMA_ID::VARCHAR AS "entity_id", e.CHANGE_TYPE AS "change_type",
+             NULL::VARCHAR AS "attribute_name", NULL::VARCHAR AS "new_value"
+          FROM NAAG_POSTGRES.NAAG_FIVETRAN_LOG.DESTINATION_SCHEMA_CHANGE_EVENT e CROSS JOIN {{ queries.date_bounds }}
+          WHERE e.DETECTED_AT >= TO_TIMESTAMP_TZ(TO_CHAR(date_bounds."start_date", 'YYYY-MM-DD') || ' 00:00:00 +00:00')
+            AND e.DETECTED_AT < TO_TIMESTAMP_TZ(TO_CHAR(DATEADD('DAY', 1, date_bounds."end_date"), 'YYYY-MM-DD') || ' 00:00:00 +00:00')
+            AND DATEDIFF('DAY', date_bounds."start_date", date_bounds."end_date") BETWEEN 0 AND 92
+            AND {{ filter('e.CONNECTION_ID', connection_id) }}
+      UNION ALL
+      SELECT CONVERT_TIMEZONE('UTC', e.DETECTED_AT) AS "detected_at_utc",
+             e.CONNECTION_ID AS "connection_id", e.DESTINATION_ID AS "destination_id", 'Table' AS "entity",
+             e.TABLE_ID::VARCHAR AS "entity_id", e.CHANGE_TYPE AS "change_type",
+             NULL::VARCHAR AS "attribute_name", NULL::VARCHAR AS "new_value"
+          FROM NAAG_POSTGRES.NAAG_FIVETRAN_LOG.DESTINATION_TABLE_CHANGE_EVENT e CROSS JOIN {{ queries.date_bounds }}
+          WHERE e.DETECTED_AT >= TO_TIMESTAMP_TZ(TO_CHAR(date_bounds."start_date", 'YYYY-MM-DD') || ' 00:00:00 +00:00')
+            AND e.DETECTED_AT < TO_TIMESTAMP_TZ(TO_CHAR(DATEADD('DAY', 1, date_bounds."end_date"), 'YYYY-MM-DD') || ' 00:00:00 +00:00')
+            AND DATEDIFF('DAY', date_bounds."start_date", date_bounds."end_date") BETWEEN 0 AND 92
+            AND {{ filter('e.CONNECTION_ID', connection_id) }}
+      UNION ALL
+      SELECT CONVERT_TIMEZONE('UTC', e.DETECTED_AT) AS "detected_at_utc",
+             e.CONNECTION_ID AS "connection_id", e.DESTINATION_ID AS "destination_id", 'Column' AS "entity",
+             e.COLUMN_ID::VARCHAR AS "entity_id", e.CHANGE_TYPE AS "change_type",
+             e.ATTRIBUTE_NAME::VARCHAR AS "attribute_name", e.NEW_VALUE::VARCHAR AS "new_value"
+          FROM NAAG_POSTGRES.NAAG_FIVETRAN_LOG.DESTINATION_COLUMN_CHANGE_EVENT e CROSS JOIN {{ queries.date_bounds }}
+          WHERE e.DETECTED_AT >= TO_TIMESTAMP_TZ(TO_CHAR(date_bounds."start_date", 'YYYY-MM-DD') || ' 00:00:00 +00:00')
+            AND e.DETECTED_AT < TO_TIMESTAMP_TZ(TO_CHAR(DATEADD('DAY', 1, date_bounds."end_date"), 'YYYY-MM-DD') || ' 00:00:00 +00:00')
+            AND DATEDIFF('DAY', date_bounds."start_date", date_bounds."end_date") BETWEEN 0 AND 92
+            AND {{ filter('e.CONNECTION_ID', connection_id) }}
+  recent_changes:
+    sql: |
+      SELECT * FROM {{ queries.change_rows }}
+      ORDER BY "detected_at_utc" DESC, "entity", "entity_id" LIMIT 200
+  change_details:
+    sql: |
+      SELECT recent_changes.*, COALESCE(ds.NAME, dt.NAME, dc.NAME) AS "current_entity_name"
+      FROM {{ queries.recent_changes }}
+      LEFT JOIN NAAG_POSTGRES.NAAG_FIVETRAN_LOG.DESTINATION_SCHEMA ds
+        ON recent_changes."entity" = 'Schema' AND recent_changes."entity_id" = ds.ID::VARCHAR
+       AND recent_changes."connection_id" = ds.CONNECTION_ID AND recent_changes."destination_id" = ds.DESTINATION_ID
+      LEFT JOIN NAAG_POSTGRES.NAAG_FIVETRAN_LOG.DESTINATION_TABLE dt
+        ON recent_changes."entity" = 'Table' AND recent_changes."entity_id" = dt.ID::VARCHAR
+       AND recent_changes."connection_id" = dt.CONNECTION_ID AND recent_changes."destination_id" = dt.DESTINATION_ID
+      LEFT JOIN NAAG_POSTGRES.NAAG_FIVETRAN_LOG.DESTINATION_COLUMN dc
+        ON recent_changes."entity" = 'Column' AND recent_changes."entity_id" = dc.ID::VARCHAR
+       AND recent_changes."connection_id" = dc.CONNECTION_ID AND recent_changes."destination_id" = dc.DESTINATION_ID
+      ORDER BY recent_changes."detected_at_utc" DESC, recent_changes."entity", recent_changes."entity_id"
+  audit_details:
+    sql: |
+      SELECT CONVERT_TIMEZONE('UTC', a.CAPTURED_AT) AS "captured_at_utc", a.ACTION AS "action", a.USER_ID AS "user_id",
+             a.INTERACTION_METHOD AS "interaction_method", a.PRIMARY_RESOURCE_TYPE AS "primary_resource_type",
+             a.PRIMARY_RESOURCE_ID AS "primary_resource_id", a.SECONDARY_RESOURCE_TYPE AS "secondary_resource_type",
+             a.SECONDARY_RESOURCE_ID AS "secondary_resource_id"
+      FROM NAAG_POSTGRES.NAAG_FIVETRAN_LOG.AUDIT_TRAIL a CROSS JOIN {{ queries.date_bounds }}
+      WHERE a.CAPTURED_AT >= TO_TIMESTAMP_TZ(TO_CHAR(date_bounds."start_date", 'YYYY-MM-DD') || ' 00:00:00 +00:00')
+        AND a.CAPTURED_AT < TO_TIMESTAMP_TZ(TO_CHAR(DATEADD('DAY', 1, date_bounds."end_date"), 'YYYY-MM-DD') || ' 00:00:00 +00:00')
+        AND DATEDIFF('DAY', date_bounds."start_date", date_bounds."end_date") BETWEEN 0 AND 92
+      ORDER BY a.CAPTURED_AT DESC, a.ID DESC LIMIT 200
+charts:
+  period:
+    type: table
+    query: period_check
+    title: Selected UTC period
+  changes_note:
+    type: callout
+    title: What changed, and when?
+    message: Latest 200 matching destination schema/table/column change records. Names come from current metadata.
+      These records are not a complete deletion history.
+    style:
+      tone: info
+  change_table:
+    type: table
+    query: change_details
+    title: Recorded destination changes
+    style:
+      columns:
+        detected_at_utc:
+          format: '%Y-%m-%d %H:%M:%S'
+  audit_note:
+    type: callout
+    title: Account-level user actions
+    message: The connection selector does not filter this tab. Resource IDs can refer to accounts, destinations
+      or users; no connection mapping is assumed. User emails and old/new audit payloads are omitted.
+    style:
+      tone: info
+  audit_table:
+    type: table
+    query: audit_details
+    title: Latest recorded actions - up to 200
+    style:
+      columns:
+        captured_at_utc:
+          format: '%Y-%m-%d %H:%M:%S'
+rows:
+- period
+- tabs:
+    items:
+    - title: Destination schema changes
+      rows:
+      - changes_note
+      - change_table
+    - title: User actions
+      rows:
+      - audit_note
+      - audit_table
