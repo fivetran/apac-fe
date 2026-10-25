@@ -1,0 +1,2 @@
+oracledb==4.0.2
+paramiko==4.0.0

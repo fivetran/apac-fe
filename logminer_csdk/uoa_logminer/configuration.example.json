@@ -1,0 +1,13 @@
+{
+  "host": "oracle.example.com",
+  "port": "1521",
+  "service_name": "ORCL",
+  "username": "REPLACE_LOCALLY",
+  "password": "REPLACE_LOCALLY",
+  "tables": "{\"APP.ORDERS\": [\"ID\", \"STATUS\"], \"APP.ITEMS\": [\"ORDER_ID\", \"LINE_ID\", \"AMOUNT\"]}",
+  "archive_log_only": "true",
+  "deployment_profile": "saas",
+  "ssh_enabled": "false",
+  "max_invocation_seconds": "600",
+  "oracle_call_timeout_seconds": "20"
+}
