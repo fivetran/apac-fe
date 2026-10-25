@@ -1,6 +1,6 @@
 # Oracle LogMiner connector for Fivetran Connector SDK
 
-An attempt to leverage Oracle Logminer to replicate data Fivetran Connector SDK. Historical loads use one
+An experimental attempt to leverage Oracle Logminer to replicate data from Oracle databases using Fivetran Connector SDK. Historical loads use one
 consistent Oracle Flashback SCN and resumable primary-key pages. Incremental
 syncs use bounded, commit-aware Oracle LogMiner windows.
 
