@@ -11,15 +11,15 @@ def valid_mapping():
         "service_name": "SERVICE",
         "username": "user",
         "password": "secret",
-        "include_schema": "animal_crossing",
-        "include_table": "housewares",
+        "include_schema": "app",
+        "include_table": "orders",
     }
 
 
 def test_configuration_normalizes_scope_and_defaults():
     config = ConnectorConfig.from_mapping(valid_mapping())
-    assert config.include_schema == "ANIMAL_CROSSING"
-    assert config.include_table == "HOUSEWARES"
+    assert config.include_schema == "APP"
+    assert config.include_table == "ORDERS"
     assert config.deployment_profile == "saas"
     assert (
         config.logminer_min_scn_span

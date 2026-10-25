@@ -8,35 +8,32 @@ from schema_evolution.ddl_detector import DdlKind, classify_ddl
     [
         (
             (
-                'ALTER SESSION SET CURRENT_SCHEMA = "ANIMAL_CROSSING"; '
-                'GRANT INSERT ON "ANIMAL_CROSSING"."HOUSEWARES" TO "FIVETRAN"'
+                'ALTER SESSION SET CURRENT_SCHEMA = "APP"; '
+                'GRANT INSERT ON "APP"."ORDERS" TO "FIVETRAN"'
             ),
             DdlKind.NON_STRUCTURAL,
         ),
         (
-            'REVOKE UPDATE ON "ANIMAL_CROSSING"."HOUSEWARES" FROM "FIVETRAN"',
+            'REVOKE UPDATE ON "APP"."ORDERS" FROM "FIVETRAN"',
             DdlKind.NON_STRUCTURAL,
         ),
         (
             (
-                'COMMENT ON TABLE "ANIMAL_CROSSING"."HOUSEWARES" IS '
+                'COMMENT ON TABLE "APP"."ORDERS" IS '
                 "'TRUNCATE TABLE ignored inside a string'"
             ),
             DdlKind.NON_STRUCTURAL,
         ),
         (
-            'TRUNCATE TABLE "ANIMAL_CROSSING"."HOUSEWARES" DROP STORAGE',
+            'TRUNCATE TABLE "APP"."ORDERS" DROP STORAGE',
             DdlKind.TRUNCATE,
         ),
         (
-            (
-                'ALTER TABLE "ANIMAL_CROSSING"."HOUSEWARES" '
-                'ADD ("A" VARCHAR2(20), "B" NUMBER)'
-            ),
+            ('ALTER TABLE "APP"."ORDERS" ADD ("A" VARCHAR2(20), "B" NUMBER)'),
             DdlKind.TABLE_SCHEMA_CHANGE,
         ),
         (
-            'FLASHBACK TABLE "ANIMAL_CROSSING"."HOUSEWARES" TO SCN 100',
+            'FLASHBACK TABLE "APP"."ORDERS" TO SCN 100',
             DdlKind.DATA_REWRITE,
         ),
         ("BEGIN NULL; END;", DdlKind.UNKNOWN),

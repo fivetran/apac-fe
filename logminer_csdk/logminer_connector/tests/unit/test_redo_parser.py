@@ -19,7 +19,7 @@ def test_canonical_timestamp_redo_matches_sdk_serializer():
         ),
     )
     values, _ = parse_sql_redo(
-        'update "ANIMAL_CROSSING"."HOUSEWARES" set "UPDATED_AT" = '
+        'update "APP"."ORDERS" set "UPDATED_AT" = '
         "TO_TIMESTAMP('2026-10-01 00:00:00.123456000') where \"ID\" = 1;",
         "UPDATE",
         temporal,
@@ -50,8 +50,8 @@ def test_temporal_redo_rejects_ambiguous_or_lossy_values(literal):
 
 def schema():
     return TableSchema(
-        owner="ANIMAL_CROSSING",
-        name="HOUSEWARES",
+        owner="APP",
+        name="ORDERS",
         object_id=1,
         data_object_id=1,
         columns=(
@@ -65,7 +65,7 @@ def schema():
 
 def test_insert_parses_escaped_string_and_null():
     values, keys = parse_sql_redo(
-        'insert into "ANIMAL_CROSSING"."HOUSEWARES"'
+        'insert into "APP"."ORDERS"'
         '("ID","NAME","NOTE") values (1,\'O\'\'Brien\',NULL);',
         "INSERT",
         schema(),
@@ -80,7 +80,7 @@ def test_insert_parses_escaped_string_and_null():
 
 def test_update_preserves_absent_columns():
     values, keys = parse_sql_redo(
-        'update "ANIMAL_CROSSING"."HOUSEWARES" set "NOTE" = NULL where "ID" = 1;',
+        'update "APP"."ORDERS" set "NOTE" = NULL where "ID" = 1;',
         "UPDATE",
         schema(),
     )
@@ -91,7 +91,7 @@ def test_update_preserves_absent_columns():
 
 def test_update_extracts_key_from_supplemental_before_image():
     values, keys = parse_sql_redo(
-        'update "ANIMAL_CROSSING"."HOUSEWARES" set "NOTE" = \'new\' '
+        'update "APP"."ORDERS" set "NOTE" = \'new\' '
         'where "ID" = 1 and "NAME" = \'old\' and "NOTE" IS NULL;',
         "UPDATE",
         schema(),
@@ -102,8 +102,8 @@ def test_update_extracts_key_from_supplemental_before_image():
 
 def test_update_ignores_rowid_pseudocolumn_but_requires_declared_key():
     values, keys = parse_sql_redo(
-        'update "ANIMAL_CROSSING"."HOUSEWARES" set "NOTE" = \'new\' '
-        'where "ROWID" = \'AAAIUOAAEAAAAIlAAA\' and "ID" = 1;',
+        'update "APP"."ORDERS" set "NOTE" = \'new\' '
+        'where "ROWID" = \'AAAIQRAAEAAAAIlAAA\' and "ID" = 1;',
         "UPDATE",
         schema(),
     )
@@ -114,8 +114,8 @@ def test_update_ignores_rowid_pseudocolumn_but_requires_declared_key():
 def test_rowid_does_not_replace_declared_primary_key():
     with pytest.raises(RedoParseError, match="complete primary key"):
         parse_sql_redo(
-            'update "ANIMAL_CROSSING"."HOUSEWARES" set "NOTE" = \'new\' '
-            "where \"ROWID\" = 'AAAIUOAAEAAAAIlAAA';",
+            'update "APP"."ORDERS" set "NOTE" = \'new\' '
+            "where \"ROWID\" = 'AAAIQRAAEAAAAIlAAA';",
             "UPDATE",
             schema(),
         )
@@ -123,7 +123,7 @@ def test_rowid_does_not_replace_declared_primary_key():
 
 def test_delete_requires_complete_primary_key():
     _, keys = parse_sql_redo(
-        'delete from "ANIMAL_CROSSING"."HOUSEWARES" where "ID" = 1;',
+        'delete from "APP"."ORDERS" where "ID" = 1;',
         "DELETE",
         schema(),
     )
@@ -132,7 +132,7 @@ def test_delete_requires_complete_primary_key():
 
 def test_delete_extracts_key_from_supplemental_before_image():
     _, keys = parse_sql_redo(
-        'delete from "ANIMAL_CROSSING"."HOUSEWARES" '
+        'delete from "APP"."ORDERS" '
         'where "NAME" = \'old\' and "NOTE" IS NULL and "ID" = 1;',
         "DELETE",
         schema(),
@@ -142,8 +142,8 @@ def test_delete_extracts_key_from_supplemental_before_image():
 
 def test_unconstrained_number_key_override_preserves_large_integer():
     exact_key_schema = TableSchema(
-        owner="ANIMAL_CROSSING",
-        name="HOUSEWARES",
+        owner="APP",
+        name="ORDERS",
         object_id=1,
         data_object_id=1,
         columns=(
@@ -165,8 +165,7 @@ def test_unconstrained_number_key_override_preserves_large_integer():
         primary_key=("ID",),
     )
     _, keys = parse_sql_redo(
-        'update "ANIMAL_CROSSING"."HOUSEWARES" set "NOTE" = \'exact\' '
-        'where "ID" = 920726000001;',
+        'update "APP"."ORDERS" set "NOTE" = \'exact\' where "ID" = 920726000001;',
         "UPDATE",
         exact_key_schema,
     )
@@ -176,8 +175,7 @@ def test_unconstrained_number_key_override_preserves_large_integer():
 def test_where_predicates_reject_unknown_columns():
     with pytest.raises(RedoParseError, match="Unknown column"):
         parse_sql_redo(
-            'delete from "ANIMAL_CROSSING"."HOUSEWARES" '
-            'where "ID" = 1 and "MISSING" = \'x\';',
+            'delete from "APP"."ORDERS" where "ID" = 1 and "MISSING" = \'x\';',
             "DELETE",
             schema(),
         )
@@ -186,7 +184,7 @@ def test_where_predicates_reject_unknown_columns():
 def test_primary_key_predicate_cannot_be_null():
     with pytest.raises(RedoParseError, match="Primary-key predicate is NULL"):
         parse_sql_redo(
-            'delete from "ANIMAL_CROSSING"."HOUSEWARES" where "ID" IS NULL;',
+            'delete from "APP"."ORDERS" where "ID" IS NULL;',
             "DELETE",
             schema(),
         )
@@ -195,7 +193,7 @@ def test_primary_key_predicate_cannot_be_null():
 def test_insert_rejects_partial_after_image():
     with pytest.raises(RedoParseError, match="complete after-image"):
         parse_sql_redo(
-            'insert into "ANIMAL_CROSSING"."HOUSEWARES"("ID","NAME") values (1,\'x\');',
+            'insert into "APP"."ORDERS"("ID","NAME") values (1,\'x\');',
             "INSERT",
             schema(),
         )
@@ -204,8 +202,7 @@ def test_insert_rejects_partial_after_image():
 def test_unsupported_expression_fails_closed():
     with pytest.raises(RedoParseError):
         parse_sql_redo(
-            'update "ANIMAL_CROSSING"."HOUSEWARES" '
-            'set "NOTE" = SYS_GUID() where "ID" = 1;',
+            'update "APP"."ORDERS" set "NOTE" = SYS_GUID() where "ID" = 1;',
             "UPDATE",
             schema(),
         )

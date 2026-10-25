@@ -3,8 +3,8 @@ from schema_models import ColumnSchema, TableSchema
 
 def table_schema():
     return TableSchema(
-        owner="ANIMAL_CROSSING",
-        name="HOUSEWARES",
+        owner="APP",
+        name="ORDERS",
         object_id=123,
         data_object_id=124,
         columns=(
@@ -43,14 +43,14 @@ def test_fingerprint_is_stable_across_round_trip():
 
 def test_sdk_schema_has_explicit_primary_key_and_types():
     definition = table_schema().sdk_definition()
-    assert definition["table"] == "animal_crossing_housewares"
+    assert definition["table"] == "app_orders"
     assert definition["primary_key"] == ["id"]
     assert definition["columns"] == {"id": "LONG", "name": "STRING"}
 
 
 def test_sdk_schema_declares_decimal_metadata_and_unconstrained_number():
     schema = TableSchema(
-        owner="ANIMAL_CROSSING",
+        owner="APP",
         name="MEASUREMENTS",
         object_id=125,
         data_object_id=126,

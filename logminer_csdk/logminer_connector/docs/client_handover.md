@@ -22,12 +22,13 @@ from the connector directory. It uses an explicit allowlist.
   from runtime deployment by `tools/stage_deployment.py`.
 - Rewrote README, architecture, state, schema evolution, operations, Oracle setup,
   sizing, SSH and SDK assumptions; added configuration, limitations and validation.
-- Kept the internal PLAN with the approved scope amendment, outside client package.
+- Recorded the implementation specification in the repository-level `PLAN.md`;
+  planning and assistant instructions remain outside the runtime/client package.
 - Retained pure legacy schema classification/barrier tests as migration reference;
   the active connector no longer calls the publication-barrier workflow.
 
 Credentials, SSH keys, configured secrets, raw evidence, virtual environments,
-SDK warehouse/state, internal AGENTS/PLAN files and Git metadata are excluded from
+SDK warehouse/state, AGENTS/PLAN instruction files and Git metadata are excluded from
 the client archive. Local credentials/keys were preserved and not rotated/deleted.
 No unrelated source or destination objects were changed.
 

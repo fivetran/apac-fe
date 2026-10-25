@@ -31,8 +31,8 @@ def column(
 
 def table(columns, primary_key=("ID",), object_id=1):
     return TableSchema(
-        "ANIMAL_CROSSING",
-        "HOUSEWARES",
+        "APP",
+        "ORDERS",
         object_id,
         1,
         tuple(columns),

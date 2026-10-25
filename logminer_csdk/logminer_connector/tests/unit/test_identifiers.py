@@ -9,17 +9,14 @@ from identifiers import (
 
 
 def test_identifier_normalization_and_quoting():
-    assert normalize_oracle_identifier("housewares", "table") == "HOUSEWARES"
-    assert quote_oracle_identifier("housewares") == '"HOUSEWARES"'
+    assert normalize_oracle_identifier("orders", "table") == "ORDERS"
+    assert quote_oracle_identifier("orders") == '"ORDERS"'
 
 
 def test_identifier_rejects_sql_text():
     with pytest.raises(ConfigurationError):
-        quote_oracle_identifier('HOUSEWARES" WHERE 1=1 --')
+        quote_oracle_identifier('ORDERS" WHERE 1=1 --')
 
 
 def test_destination_name_includes_owner():
-    assert (
-        destination_table_name("ANIMAL_CROSSING", "HOUSEWARES")
-        == "animal_crossing_housewares"
-    )
+    assert destination_table_name("APP", "ORDERS") == "app_orders"
